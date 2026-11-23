@@ -1167,3 +1167,163 @@ fn revolution_consumes_the_preceding_profile_object() {
         Some(&"29".into())
     );
 }
+
+#[test]
+fn revolve_turn_reversed_applies_to_temporary_axis_and_line_reference() {
+    let su_ob_list_tail = |reversed: bool| {
+        let mut tail = Vec::new();
+        let mut nine_byte = [0u8; 9];
+        if reversed {
+            nine_byte[2] = 1;
+        }
+        tail.extend_from_slice(&nine_byte);
+        tail.extend_from_slice(b"\xff\xff\x01\x00\x08\x00suObList");
+        tail.extend_from_slice(&[0, 0, 3, 0, 0, 0, 1, 0, 0, 0, 0xff, 0xff]);
+        tail
+    };
+    let resolve_axis_direction = |payload: Vec<u8>, rev_offset: usize| {
+        let feature = |id: &str, source: &str, class: &str| Feature {
+            id: id.into(),
+            parent: "history".into(),
+            xml_tag: "Feature".into(),
+            tree_parent: None,
+            source_id: Some(FeatureSource::try_from(source).expect("test feature source id")),
+            ordinal: 0,
+            name: id.to_string(),
+            kind: String::new(),
+            input_class: Some(class.into()),
+            suppressed: false,
+            parameters: BTreeMap::default(),
+            dimension_properties: BTreeMap::default(),
+            properties: BTreeMap::default(),
+            text: None,
+            content: Vec::new(),
+        };
+        let mut histories = [FeatureHistory {
+            id: "history".into(),
+            part_name: None,
+            properties: BTreeMap::default(),
+            content: Vec::new(),
+            configurations: Vec::new(),
+            features: vec![
+                feature("profile", "42", "moProfileFeature_c"),
+                feature("revolution", "28", "moRevolution_c"),
+            ],
+        }];
+        let lane = FeatureInputLane {
+            id: "lane".into(),
+            configuration: None,
+            native_payload: payload.into(),
+            classes: Vec::new(),
+            names: vec![
+                FeatureInputName {
+                    id: "profile-name".into(),
+                    parent: "lane".into(),
+                    ordinal: 0,
+                    offset: 0,
+                    object_id: ObjectId::from_value(42),
+                    value: "profile".into(),
+                },
+                FeatureInputName {
+                    id: "revolution-name".into(),
+                    parent: "lane".into(),
+                    ordinal: 1,
+                    offset: u64::try_from(rev_offset).expect("offset fits u64"),
+                    object_id: ObjectId::from_value(28),
+                    value: "revolution".into(),
+                },
+            ],
+            scalars: Vec::new(),
+            relation_bindings: Vec::new(),
+            relation_instances: Vec::new(),
+            body_selections: Vec::new(),
+            edge_selections: Vec::new(),
+            surface_selections: Vec::new(),
+            generated_surface_identities: Vec::new(),
+            references: Vec::new(),
+            sketch_entities: Vec::new(),
+        };
+        enrich_history_revolution_inputs_test(&mut histories, &[lane]);
+        let dir = histories[0].features[1]
+            .properties
+            .get("AxisDirection")
+            .expect("AxisDirection");
+        dir.split(',')
+            .map(|component| component.parse::<f64>().expect("f64 component"))
+            .collect::<Vec<_>>()
+    };
+
+    for (reversed, expected_y) in [(false, 1.0), (true, -1.0)] {
+        let mut payload = vec![0; 32];
+        payload.extend_from_slice(&authored_temporary_axis([0.011, -0.023, 0.037], true));
+        payload.extend_from_slice(&su_ob_list_tail(reversed));
+        let dir = resolve_axis_direction(payload, 32);
+        assert!((dir[1] - expected_y).abs() < 1e-12);
+    }
+
+    for (reversed, expected_x) in [(false, 1.0), (true, -1.0)] {
+        let mut nested = vec![0; 300];
+        let handles = 132;
+        let source = handles - 44;
+        nested[source..source + 4].copy_from_slice(&42u32.to_le_bytes());
+        nested[source + 4..source + 8].copy_from_slice(&0x4890_6465u32.to_le_bytes());
+        nested[source + 8..source + 10].copy_from_slice(&0x80b6u16.to_le_bytes());
+        nested[source + 12..source + 16].copy_from_slice(&[0xff; 4]);
+        nested[source + 16..source + 20].copy_from_slice(&7u32.to_le_bytes());
+        nested[source + 20..source + 24].copy_from_slice(&1u32.to_le_bytes());
+        nested[source + 28..source + 32].copy_from_slice(&126u32.to_le_bytes());
+        for offset in [handles, handles + 4] {
+            nested[offset..offset + 4].copy_from_slice(&[0xc7, 0xcf, 0xff, 0xff]);
+        }
+        nested[handles + 12..handles + 16].copy_from_slice(&3800u32.to_le_bytes());
+        for (index, value) in [0.056, -0.051, -0.008, 0.0, 1.0, 0.0, 0.0]
+            .into_iter()
+            .enumerate()
+        {
+            let offset = handles + 24 + index * 8;
+            nested[offset..offset + 8].copy_from_slice(&f64::to_le_bytes(value));
+        }
+        nested[handles + 85..handles + 89].copy_from_slice(&103u32.to_le_bytes());
+        nested.extend_from_slice(&su_ob_list_tail(reversed));
+        let dir = resolve_axis_direction(nested, 32);
+        assert!((dir[0] - expected_x).abs() < 1e-12);
+    }
+
+    let mut three_handle_eight_scalar = vec![0; 260];
+    let handles = 128;
+    three_handle_eight_scalar[handles - 48..handles - 44].copy_from_slice(&42u32.to_le_bytes());
+    three_handle_eight_scalar[handles - 44..handles - 40]
+        .copy_from_slice(&0x6b00_7d67u32.to_le_bytes());
+    three_handle_eight_scalar[handles - 40..handles - 38].copy_from_slice(&0x80bau16.to_le_bytes());
+    three_handle_eight_scalar[handles - 36..handles - 32].copy_from_slice(&[0xff; 4]);
+    three_handle_eight_scalar[handles - 28..handles - 24].copy_from_slice(&5u32.to_le_bytes());
+    three_handle_eight_scalar[handles - 24..handles - 20].copy_from_slice(&1u32.to_le_bytes());
+    three_handle_eight_scalar[handles - 16..handles - 12].copy_from_slice(&0x68u32.to_le_bytes());
+    for offset in [handles, handles + 4, handles + 8] {
+        three_handle_eight_scalar[offset..offset + 4].copy_from_slice(&[0xc7, 0xcf, 0xff, 0xff]);
+    }
+    let handles_end = handles + 12;
+    three_handle_eight_scalar[handles_end + 4..handles_end + 8]
+        .copy_from_slice(&0x36b0u32.to_le_bytes());
+    for (index, value) in [0.0, 0.064_772_042_696_300_63, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+        .into_iter()
+        .enumerate()
+    {
+        let offset = handles_end + 20 + index * 8;
+        three_handle_eight_scalar[offset..offset + 8].copy_from_slice(&f64::to_le_bytes(value));
+    }
+    three_handle_eight_scalar[handles_end + 85..handles_end + 89].copy_from_slice(CLASS_MARKER);
+    assert_eq!(
+        revolution_line_reference_inputs(
+            &three_handle_eight_scalar,
+            32,
+            three_handle_eight_scalar.len(),
+            &HashSet::from([42])
+        ),
+        Some((
+            42,
+            Point3::new(0.0, 64.772_042_696_300_63, 0.0),
+            Vector3::new(0.0, 1.0, 0.0)
+        ))
+    );
+}

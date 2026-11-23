@@ -429,6 +429,18 @@ Two omitted owner-qualified construction circles have separate current/extended 
 
 **Need.** We must know the selector values to terminate the extrusion at the correct edge endpoint.
 
+### DI-16. Extrusion travel sense relative to the profile frame
+
+**Question.** Which native fields set the signed extrusion travel relative to the profile frame?
+
+**Known.** The compact end-spec has Boolean words at anchor +8 and +12. In a Front-plane blind extrusion, anchor +12 is `0` for travel along the profile normal and `1` for travel opposite the profile normal. Its direction-count word and termination codes define the extent form. A nested planar profile has a surface normal and a face sense.
+
+**Need.** Controlled opposite-travel definitions across non-blind termination kinds and Top/Right planes with the same owned profile, plane reference, end-spec form, and surviving end caps must establish each sense field and its composition with the profile frame.
+
+**Conflict.** The Boolean end-spec words and nested face senses each occur with both travel senses in final-cap witnesses.
+
+**Note.** Later features can consume an extrusion end cap. A missing final cap leaves the historical travel witness unresolved.
+
 ### DI-17. Second-direction codes without a defined second side
 
 **Question.** Does a nonzero second-direction code take effect when the direction count at anchor +4 is `1`? What second side does a second-direction code other than `0` or `1` define when anchor +4 is `0`, and what do first-direction codes `2` through `5` define with `0` at anchor +4?
@@ -1050,6 +1062,18 @@ The face geometry after a `moFaceRefPlnData_c` in an in-context part has two obs
 
 **Need.** We must know their content to transfer it or to state that it is not model geometry. Without it, the document keeps the part losses that report an untransferred Parasolid model.
 
+### EV-25. Turn sense of a partial revolution
+
+**Question.** Which way does the travel of a partial `moRevolution_c` or `moRevCut_c` turn about the stored axis direction across independent revolutions, and does the end-face geometry always match the `+2` u32 `1` reversal flag?
+
+**Known.** `sldprt.md` §2 "The revolution object interval may contain a declared or repeated" stores a point on the axis and a unit axis direction. `sldprt.md` §2 "An `moRevolution_c` or `moRevCut_c` history record" stores positive angles, and a reversed partial revolution writes little-endian u32 `1` at `+2` of the nine-byte block before `suObList`.
+
+**Need.** Independent partial revolutions with stored solids whose end faces show the side of the travel, compared with the stored axis direction and `+2` reversal flag.
+
+**Conflict.** CADIR states a right-handed turn about `RevolutionAxis.direction`. End-face agreement must be confirmed across independent partial revolutions.
+
+**Note.** A full turn sweeps the same region in either sense, so it does not answer this question.
+
 ### EV-26. Partial ellipse vs arc for a `0xffff` pair
 
 **Question.** Can a sketch curve record with `0xffff` at +80 and `0xffff` at +82 be a partial ellipse?
@@ -1091,6 +1115,18 @@ The face geometry after a `moFaceRefPlnData_c` in an in-context part has two obs
 **Need.** Determine the byte fields that bind each remaining reference form to its profile coordinates and normal direction. Establish each complete rule with independent profile and mirrored-polarity controls.
 
 **Conflict.** The local component's N=+Y and the declared fallback's N=+Z select different normal axes.
+
+### SF-02. Right component ownership and profile coordinates
+
+**Question.** Which native role or operand field binds a Right component to the sketch support plane and selects the profile coordinate convention?
+
+**Known.** A complete profile-local `(4,1)` component occurs with a scoped Front declaration or a lane-default Front reference. The scoped declaration lies in the profile or its immediate context. The matrix identifies the referenced frame. The intrinsic component mapping can lose finite carrier support on the retained profile plane in both forms. The decoder retains the existing profile binding when the component source conflicts with it.
+
+**Need.** Establish the support-plane role and profile coordinate rule from explicit fields, including the enclosing reference and operand path. Distinguish finite support from intersections with carrier extensions. Establish each selected form with independent designs, mirrored-polarity controls, and per-sample carrier retention.
+
+**Conflict.** The Right matrix normal is +X. The retained Front component fallback normal is -Y.
+
+**Note.** Right component mappings retain their current interpretation and losses. The scoped and lane Front fallbacks retain their frames. Section 3.3 defines local Top component profile placement.
 
 ### DI-69. Extrusion Boolean carriers
 

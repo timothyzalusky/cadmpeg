@@ -1,5 +1,6 @@
 //! Tests for the `terminations` module.
 
+mod blind_direction;
 mod body_path_boundary;
 
 use super::super::selections::COMPACT_EDGE_VECTOR_MARKER;

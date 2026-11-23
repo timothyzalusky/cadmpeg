@@ -431,30 +431,45 @@ pub(super) fn compact_line_reference_directions(
 }
 
 fn revolve_turn_reversed(payload: &[u8], object_start: usize, object_end: usize) -> bool {
-    const LINE_REF: &[u8] = b"\xff\xff\x01\x00\x0b\x00moLineRef_w";
+    const SU_OB_LIST_DECL: &[u8] = b"\xff\xff\x01\x00\x08\x00suObList";
     let Some(slice) = payload.get(object_start..object_end) else {
         return false;
     };
-    let Some(rel) = slice
-        .windows(LINE_REF.len())
-        .position(|window| window == LINE_REF)
-    else {
-        return false;
-    };
-    let Some(block_start) = rel.checked_sub(21) else {
-        return false;
-    };
-    let Some(block) = slice.get(block_start..block_start + 9) else {
-        return false;
-    };
-    let Some(su_ob_list_token) = View::u16_le_at(slice, block_start + 9) else {
-        return false;
-    };
-    is_class_token(su_ob_list_token)
-        && slice.get(block_start + 11..block_start + 13) == Some(&[0, 0])
-        && block[..2] == [0, 0]
-        && block[2..6] == 1u32.to_le_bytes()
-        && block[6..9] == [0, 0, 0]
+    let reversed_block = [0, 0, 1, 0, 0, 0, 0, 0, 0];
+    for (block_start, window) in slice.windows(reversed_block.len()).enumerate() {
+        if window != reversed_block {
+            continue;
+        }
+        let after_block = block_start + reversed_block.len();
+        let after_list = if slice.get(after_block..after_block + SU_OB_LIST_DECL.len())
+            == Some(SU_OB_LIST_DECL)
+        {
+            after_block + SU_OB_LIST_DECL.len()
+        } else if let Some(token) = View::u16_le_at(slice, after_block) {
+            if !is_class_token(token) {
+                continue;
+            }
+            after_block + 2
+        } else {
+            continue;
+        };
+        if slice.get(after_list..after_list + 2) != Some(&[0, 0]) {
+            continue;
+        }
+        let Some(kind) = View::u32_le_at(slice, after_list + 2) else {
+            continue;
+        };
+        if !matches!(kind, 3 | 5) || View::u32_le_at(slice, after_list + 6).is_none() {
+            continue;
+        }
+        let Some(next_word) = View::u16_le_at(slice, after_list + 10) else {
+            continue;
+        };
+        if next_word == u16::MAX || is_class_token(next_word) {
+            return true;
+        }
+    }
+    false
 }
 
 fn revolution_line_reference_inputs(
@@ -718,6 +733,22 @@ fn revolution_line_reference_inputs(
             let Some(source) = unique_source.filter(|_| !conflicting_source) else {
                 continue;
             };
+            if payload.get(handles_end + 8..handles_end + 20) == Some(&[0; 12]) {
+                let frame = handles_end + 20;
+                let record_end = frame + 8 * 8;
+                if let (Some(axis), true) = (
+                    axis_record(frame, 8),
+                    scalar(frame + 24) == Some(0.0)
+                        && scalar(frame + 32) == Some(0.0)
+                        && next_class_after_zeros(record_end, 24).is_some(),
+                ) {
+                    let ranked = (handle_start, 8, (source, axis.0, axis.1));
+                    if !candidates.contains(&ranked) {
+                        candidates.push(ranked);
+                    }
+                    continue;
+                }
+            }
             for frame_gap in [0usize, 4, 8] {
                 if payload
                     .get(handles_end + 8..handles_end + 8 + frame_gap)
@@ -1001,13 +1032,14 @@ pub(crate) fn enrich_history_revolution_inputs(
                     known_profiles,
                 );
                 let placed_axis = line_reference
-                    .map(|(_, origin, mut direction)| {
+                    .map(|(_, origin, direction)| (origin, direction))
+                    .or_else(|| temporary_axis_reference(&lane.native_payload, start, end))
+                    .map(|(origin, mut direction)| {
                         if revolve_turn_reversed(&lane.native_payload, start, end) {
                             direction = direction.reversed();
                         }
                         (origin, direction)
-                    })
-                    .or_else(|| temporary_axis_reference(&lane.native_payload, start, end));
+                    });
                 profiles
                     .entry(feature.id.clone())
                     .or_default()

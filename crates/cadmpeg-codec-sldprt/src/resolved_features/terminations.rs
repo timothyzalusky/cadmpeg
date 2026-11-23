@@ -424,11 +424,11 @@ pub(crate) fn enrich_history_extrusion_terminations(
                         }))
                     })()?;
                 if let Some(candidate) = candidate {
+                    let reversed = matches!(candidate, TerminationVote::Blind { .. })
+                        .then(|| compact_extrusion_direction_flag(&lane.native_payload, offset))
+                        .flatten();
                     candidates.push(candidate);
-                    candidate_reversed.push(compact_extrusion_direction_flag(
-                        &lane.native_payload,
-                        offset,
-                    ));
+                    candidate_reversed.push(reversed);
                 }
             }
             let grouped = (grouped_blind.get(feature_id.as_str()) == Some(&1))
@@ -465,25 +465,33 @@ pub(crate) fn enrich_history_extrusion_terminations(
                 super::extrusion_start::insert_condition(&mut feature.properties, condition)?;
             }
         }
-        if let Some(senses) = direction_senses.get(&feature.id) {
-            if !feature.properties.contains_key("DirectionSense")
-                && !senses.is_empty()
-                && senses.iter().all(|sense| *sense == Some(true))
-            {
-                insert_termination_field(
-                    &mut feature.properties,
-                    "DirectionSense",
-                    "Reversed".to_owned(),
-                )?;
+        let blind_history = feature
+            .properties
+            .get("EndCondition")
+            .is_some_and(|condition| condition == "Blind");
+        let vote = if feature.properties.contains_key("EndCondition") {
+            None
+        } else {
+            terminations
+                .get(&feature.id)
+                .and_then(|votes| consensus_termination_vote(votes))
+        };
+        let blind_vote = matches!(vote, Some(TerminationVote::Blind { .. }));
+        if blind_history || blind_vote {
+            if let Some(senses) = direction_senses.get(&feature.id) {
+                if !feature.properties.contains_key("DirectionSense")
+                    && !senses.is_empty()
+                    && senses.iter().all(|sense| *sense == Some(true))
+                {
+                    insert_termination_field(
+                        &mut feature.properties,
+                        "DirectionSense",
+                        "Reversed".to_owned(),
+                    )?;
+                }
             }
         }
-        if feature.properties.contains_key("EndCondition") {
-            continue;
-        }
-        let Some(votes) = terminations.get(&feature.id) else {
-            continue;
-        };
-        let Some(vote) = consensus_termination_vote(votes) else {
+        let Some(vote) = vote else {
             continue;
         };
         let condition = vote.condition().to_owned();
